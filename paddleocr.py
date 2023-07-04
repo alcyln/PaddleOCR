@@ -47,11 +47,15 @@ from ppocr.utils.utility import check_and_read, get_image_file_list
 from ppocr.utils.network import maybe_download, download_with_progressbar, is_link, confirm_model_dir_url
 from tools.infer.utility import draw_ocr, str2bool, check_gpu
 from ppstructure.utility import init_args, draw_structure_result
-from ppstructure.predict_system import StructureSystem, save_structure_res, to_excel
+from ppstructure.predict_system import StructureSystem, save_structure_res, to_excel, draw_ser_results, draw_re_results
+
+# from tools.infer_kie_token_ser_re import SerRePredictor
 
 __all__ = [
-    'PaddleOCR', 'PPStructure', 'draw_ocr', 'draw_structure_result',
-    'save_structure_res', 'download_with_progressbar', 'to_excel'
+    'PaddleOCR', 'PPStructure', 'PPKIE', 
+    'draw_ocr', 'draw_structure_result', 'draw_ser_results', 'draw_re_results',
+    'save_structure_res', 
+    'download_with_progressbar', 'to_excel'
 ]
 
 SUPPORT_DET_MODEL = ['DB']
@@ -63,6 +67,8 @@ DEFAULT_OCR_MODEL_VERSION = 'PP-OCRv3'
 SUPPORT_OCR_MODEL_VERSION = ['PP-OCR', 'PP-OCRv2', 'PP-OCRv3']
 DEFAULT_STRUCTURE_MODEL_VERSION = 'PP-StructureV2'
 SUPPORT_STRUCTURE_MODEL_VERSION = ['PP-Structure', 'PP-StructureV2']
+DEFAULT_KIE_MODEL_VERSION = ['PP-KIE']
+SUPPORT_KIE_MODEL_VERSION = ['PP-KIE']
 MODEL_URLS = {
     'OCR': {
         'PP-OCRv3': {
@@ -308,6 +314,34 @@ MODEL_URLS = {
                 }
             }
         }
+    },
+    'KIE': {
+        'PP-KIE': {
+            'ser': {
+                'en': {
+                    'url':
+                    'https://paddleocr.bj.bcebos.com/ppstructure/models/vi_layoutxlm/ser_vi_layoutxlm_xfund_infer.tar',
+                    'dict_path': 'ppocr/utils/dict/kie_dict/xfund_class_list.txt'
+                },
+                'ch': {
+                    'url':
+                    'https://paddleocr.bj.bcebos.com/ppstructure/models/vi_layoutxlm/ser_vi_layoutxlm_xfund_infer.tar',
+                    'dict_path': 'ppocr/utils/dict/kie_dict/xfund_class_list.txt'
+                }
+            },
+            're': {
+                'en': {
+                    'url':
+                    'https://paddleocr.bj.bcebos.com/ppstructure/models/vi_layoutxlm/re_vi_layoutxlm_xfund_infer.tar',
+                    'dict_path': None
+                },
+                'ch': {
+                    'url':
+                    'https://paddleocr.bj.bcebos.com/ppstructure/models/vi_layoutxlm/re_vi_layoutxlm_xfund_infer.tar',
+                    'dict_path': None
+                }
+            }
+        }
     }
 }
 
@@ -338,10 +372,16 @@ def parse_args(mMain=True):
         help='Model version, the current model support list is as follows:'
         ' 1. PP-Structure Support en table structure model.'
         ' 2. PP-StructureV2 Support ch and en table structure model.')
+    parser.add_argument(
+        "--kie_version",
+        type=str,
+        choices=SUPPORT_KIE_MODEL_VERSION,
+        default='PP-KIE',
+        help='Key Information Extraction Model.')
 
     for action in parser._actions:
         if action.dest in [
-                'rec_char_dict_path', 'table_char_dict_path', 'layout_dict_path'
+                'rec_char_dict_path', 'table_char_dict_path', 'layout_dict_path', 'ser_dict_path'
         ]:
             action.default = None
     if mMain:
@@ -396,6 +436,8 @@ def get_model_config(type, version, model_type, lang):
         DEFAULT_MODEL_VERSION = DEFAULT_OCR_MODEL_VERSION
     elif type == 'STRUCTURE':
         DEFAULT_MODEL_VERSION = DEFAULT_STRUCTURE_MODEL_VERSION
+    elif type == 'KIE':
+        DEFAULT_MODEL_VERSION = DEFAULT_KIE_MODEL_VERSION
     else:
         raise NotImplementedError
 
@@ -532,9 +574,8 @@ class PaddleOCR(predict_system.TextSystem):
         # for infer pdf file
         if isinstance(img, list):
             if self.page_num > len(img) or self.page_num == 0:
-                imgs=img
-            else:
-                imgs = img[:self.page_num]
+                self.page_num = len(img)
+            imgs = img[:self.page_num]
         else:
             imgs = [img]
         if det and rec:
@@ -634,6 +675,84 @@ class PPStructure(StructureSystem):
             img, return_ocr_result_in_table, img_idx=img_idx)
         return res
 
+class PPKIE(StructureSystem):
+    def __init__(self, **kwargs):
+        params = parse_args(mMain=False)
+        params.__dict__.update(**kwargs)
+        assert params.kie_version in SUPPORT_KIE_MODEL_VERSION, "kie_version must in {}, but get {}".format(
+            SUPPORT_KIE_MODEL_VERSION, params.kie_version)
+        params.use_gpu = check_gpu(params.use_gpu)
+        params.mode = 'kie'
+
+        if not params.show_log:
+            logger.setLevel(logging.INFO)
+        lang, det_lang = parse_lang(params.lang)
+        # if lang == 'ch':
+        #     table_lang = 'ch'
+        # else:
+        #     table_lang = 'en'
+        if params.kie_version == 'PP-KIE':
+            params.merge_no_span_structure = False
+
+        # init model dir
+        # det_model_config = get_model_config('OCR', params.ocr_version, 'det',
+        #                                     det_lang)
+        # params.det_model_dir, det_url = confirm_model_dir_url(
+        #     params.det_model_dir,
+        #     os.path.join(BASE_DIR, 'whl', 'det', det_lang),
+        #     det_model_config['url'])
+        # rec_model_config = get_model_config('OCR', params.ocr_version, 'rec',
+        #                                     lang)
+        # params.rec_model_dir, rec_url = confirm_model_dir_url(
+        #     params.rec_model_dir,
+        #     os.path.join(BASE_DIR, 'whl', 'rec', lang), rec_model_config['url'])
+        
+        # table_model_config = get_model_config(
+        #     'STRUCTURE', params.kie_version, 'table', table_lang)
+        # params.table_model_dir, table_url = confirm_model_dir_url(
+        #     params.table_model_dir,
+        #     os.path.join(BASE_DIR, 'whl', 'table'), table_model_config['url'])
+
+        ser_model_config = get_model_config(
+            'KIE', params.kie_version, 'ser', lang)
+        params.ser_model_dir, ser_url = confirm_model_dir_url(
+            params.ser_model_dir,
+            os.path.join(BASE_DIR, 'whl', 'ser'), ser_model_config['url'])
+        re_model_config = get_model_config(
+            'KIE', params.kie_version, 're', lang)
+        params.re_model_dir, re_url = confirm_model_dir_url(
+            params.re_model_dir,
+            os.path.join(BASE_DIR, 'whl', 're'), re_model_config['url'])
+
+
+        # download model
+        # maybe_download(params.det_model_dir, det_url)
+        # maybe_download(params.rec_model_dir, rec_url)
+        # maybe_download(params.table_model_dir, table_url)
+        maybe_download(params.ser_model_dir, ser_url)
+        maybe_download(params.re_model_dir, re_url)
+
+        # if params.rec_char_dict_path is None:
+        #     params.rec_char_dict_path = str(
+        #         Path(__file__).parent / rec_model_config['dict_path'])
+        # if params.table_char_dict_path is None:
+        #     params.table_char_dict_path = str(
+        #         Path(__file__).parent / table_model_config['dict_path'])
+        if params.ser_dict_path is None:
+            params.ser_dict_path = str(
+                Path(__file__).parent / ser_model_config['dict_path'])
+        # if params.re_dict_path is None:
+        #     params.re_dict_path = str(
+        #         Path(__file__).parent / re_model_config['dict_path'])
+        logger.debug(params)
+        super().__init__(params)
+
+    def __call__(self, img, return_ocr_result_in_table=False, img_idx=0):
+        # img = check_img(img)
+        # res, _ = super().__call__(
+        #     img, return_ocr_result_in_table, img_idx=img_idx)
+        # return res
+        return super().kie_predictor(img)
 
 def main():
     # for cmd
