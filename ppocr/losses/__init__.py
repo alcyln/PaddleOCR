@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import sys
 import copy
 import paddle
 import paddle.nn as nn
@@ -65,6 +67,10 @@ from .vqa_token_layoutlm_loss import VQASerTokenLayoutLMLoss
 from .stroke_focus_loss import StrokeFocusLoss
 from .text_focus_loss import TelescopeLoss
 
+__dir__ = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.abspath(os.path.join(__dir__, '../..')))
+
+__all__ = ['build_loss']
 
 def build_loss(config):
     support_dict = [
