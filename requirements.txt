@@ -1,3 +1,4 @@
+paddlepaddle-gpu==2.4.2.post117 -f https://www.paddlepaddle.org.cn/whl/linux/mkl/avx/stable.html
 shapely
 scikit-image
 imgaug
